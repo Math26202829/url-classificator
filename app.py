@@ -8,7 +8,7 @@ import time
 
 # -------------------- OpenAI --------------------
 # Récupère la clé depuis variable d'environnement
-client = OpenAI(api_key="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")
+client = OpenAI(api_key="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")
 
 # -------------------- Catégories --------------------
 DOMAIN_CATEGORIES = [
