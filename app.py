@@ -3,11 +3,12 @@ import pandas as pd
 import openai
 import json
 from io import BytesIO
+import os
 
-# Clé OpenAI depuis Streamlit Secrets
+# Récupération de la clé OpenAI depuis variable d'environnement
 openai.api_key = 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
 
-# Catégories possibles
+# Catégories
 DOMAIN_CATEGORIES = [
     "Brand Site",
     "Retailer",
@@ -28,7 +29,6 @@ PAGE_CATEGORIES = [
     "Other"
 ]
 
-# Fonction de classification intelligente
 def classify_url(url, title=None):
     prompt = f"""
 Tu es un expert en e-commerce et analyse de sites web. 
@@ -81,21 +81,25 @@ Réponds uniquement par un JSON valide, exemple :
         st.warning(f"Erreur GPT pour {url}: {e}")
         return "Other", "Other"
 
-# Interface Streamlit
-st.title("Classification intelligente de sites web et pages")
+# Streamlit interface
+st.title("Classification intelligente de sites web et pages (Screaming Frog CSV)")
 
-uploaded_file = st.file_uploader("Importer un CSV avec colonnes 'url' et 'title'", type=["csv"])
+uploaded_file = st.file_uploader("Importer un CSV export Screaming Frog", type=["csv"])
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    if "url" not in df.columns:
-        st.error("Le fichier doit contenir une colonne 'url'.")
+    
+    # Vérification des colonnes
+    if "Adresse" not in df.columns:
+        st.error("Le fichier doit contenir la colonne 'Adresse' pour les URLs.")
     else:
-        df['title'] = df['title'] if 'title' in df.columns else None
+        # On récupère la colonne title 1 si elle existe
+        df['title 1'] = df['title 1'] if 'title 1' in df.columns else None
+        
         st.info("Classification en cours, cela peut prendre quelques secondes par ligne...")
         
-        # Application de la classification GPT
+        # Application de GPT pour chaque ligne
         df[['domain_type','page_type']] = df.apply(
-            lambda row: pd.Series(classify_url(row['url'], row['title'])),
+            lambda row: pd.Series(classify_url(row['Adresse'], row['title 1'])),
             axis=1
         )
         
