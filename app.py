@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
-import openai
 import json
 from io import BytesIO
 import os
+from openai import OpenAI
+import time
 
-# Récupération de la clé OpenAI depuis variable d'environnement
-openai.api_key = "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"
+# Initialise client OpenAI (version >=1.0.0)
+client = OpenAI(api_key="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")
 
 # Catégories
 DOMAIN_CATEGORIES = [
@@ -29,16 +30,27 @@ PAGE_CATEGORIES = [
     "Other"
 ]
 
-def classify_url(url, title=None):
+# Batch size
+BATCH_SIZE = 50  # Nombre d'URLs par requête GPT
+
+# Fonction pour créer le prompt de batch
+def create_batch_prompt(batch):
+    prompt_lines = []
+    for row in batch:
+        url = row['Adresse']
+        title = row['title 1'] if row['title 1'] else "N/A"
+        prompt_lines.append(f"URL: {url}\nTitle: {title}")
+    urls_text = "\n\n".join(prompt_lines)
+    
     prompt = f"""
-Tu es un expert en e-commerce et analyse de sites web. 
-Pour le site suivant, réponds par un JSON avec deux champs : "domain_type" et "page_type".
+Tu es un expert en e-commerce et analyse de sites web.
+Pour chaque URL ci-dessous, renvoie un JSON avec "domain_type" et "page_type" pour chaque URL.
 
 Règles :
-1. "domain_type" doit être une seule catégorie parmi : {', '.join(DOMAIN_CATEGORIES)}
-2. "page_type" doit être une seule catégorie parmi : {', '.join(PAGE_CATEGORIES)}
+- "domain_type" doit être une seule catégorie parmi : {', '.join(DOMAIN_CATEGORIES)}
+- "page_type" doit être une seule catégorie parmi : {', '.join(PAGE_CATEGORIES)}
 
-Exemples pour "domain_type" :
+Exemples pour "domain_type":
 - Brand Site : loewe.com, hermes.com
 - Retailer : nordstrom.com, zalando.com
 - Marketplace : aliexpress.com, amazon.com
@@ -48,7 +60,7 @@ Exemples pour "domain_type" :
 - Social Media : youtube.com, instagram.com
 - Other : ebay.com, artprice.com
 
-Exemples pour "page_type" :
+Exemples pour "page_type":
 - Homepage : www.loewe.com
 - PLP : www.nordstrom.com/women/shoes
 - PDP : www.loewe.com/handbags/classic-bag
@@ -56,59 +68,78 @@ Exemples pour "page_type" :
 - Video : www.youtube.com/watch?v=xxxx
 - Other : tout ce qui ne correspond pas aux catégories ci-dessus
 
-URL: {url}
-Titre de la page: {title if title else 'N/A'}
+Voici les URLs à classer :
+{urls_text}
 
-Réponds uniquement par un JSON valide, exemple :
-{{"domain_type": "Brand Site", "page_type": "PDP"}}
+Réponds uniquement par un JSON valide de la forme :
+{{ "URL1": { "domain_type": "...", "page_type": "..." }, "URL2": {...}, ... }}
 """
+    return prompt
+
+# Fonction de classification d'un batch
+def classify_batch(batch):
+    prompt = create_batch_prompt(batch)
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-        result_text = response.choices[0].message.content.strip()
-        result_json = json.loads(result_text)
-        domain = result_json.get("domain_type")
-        page = result_json.get("page_type")
-        if domain not in DOMAIN_CATEGORIES:
-            domain = "Other"
-        if page not in PAGE_CATEGORIES:
-            page = "Other"
-        return domain, page
+        text = response.choices[0].message.content.strip()
+        data = json.loads(text)
+        return data
     except Exception as e:
-        st.warning(f"Erreur GPT pour {url}: {e}")
-        return "Other", "Other"
+        st.warning(f"Erreur GPT pour un batch: {e}")
+        return {}
 
-# Streamlit interface
+# ---------------- Streamlit ----------------
 st.title("Classification intelligente de sites web et pages (Screaming Frog CSV)")
 
 uploaded_file = st.file_uploader("Importer un CSV export Screaming Frog", type=["csv"])
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     
-    # Vérification des colonnes
     if "Adresse" not in df.columns:
         st.error("Le fichier doit contenir la colonne 'Adresse' pour les URLs.")
     else:
-        # On récupère la colonne title 1 si elle existe
         df['title 1'] = df['title 1'] if 'title 1' in df.columns else None
         
-        st.info("Classification en cours, cela peut prendre quelques secondes par ligne...")
+        st.info("Classification en cours, cela peut prendre un certain temps pour 38 000 URLs...")
         
-        # Application de GPT pour chaque ligne
-        df[['domain_type','page_type']] = df.apply(
-            lambda row: pd.Series(classify_url(row['Adresse'], row['title 1'])),
-            axis=1
-        )
+        results = []
         
-        st.dataframe(df)
+        # Découpage en batches
+        for i in range(0, len(df), BATCH_SIZE):
+            batch = df.iloc[i:i+BATCH_SIZE].to_dict('records')
+            batch_result = classify_batch(batch)
+            
+            # Mapping des résultats sur le batch
+            for row in batch:
+                url = row['Adresse']
+                if url in batch_result:
+                    results.append({
+                        "Adresse": url,
+                        "title 1": row['title 1'],
+                        "domain_type": batch_result[url].get("domain_type", "Other"),
+                        "page_type": batch_result[url].get("page_type", "Other")
+                    })
+                else:
+                    results.append({
+                        "Adresse": url,
+                        "title 1": row['title 1'],
+                        "domain_type": "Other",
+                        "page_type": "Other"
+                    })
+            st.write(f"Batch {i//BATCH_SIZE+1}/{len(df)//BATCH_SIZE+1} traité")
+            time.sleep(1)  # petite pause pour éviter de saturer l'API
+        
+        result_df = pd.DataFrame(results)
+        st.dataframe(result_df)
         
         # Export Excel
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='Classification')
+            result_df.to_excel(writer, index=False, sheet_name='Classification')
         output.seek(0)
         
         st.download_button(
