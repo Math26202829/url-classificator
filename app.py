@@ -6,10 +6,11 @@ import os
 from openai import OpenAI
 import time
 
-# Initialise client OpenAI (version >=1.0.0)
+# -------------------- OpenAI --------------------
+# Récupère la clé depuis variable d'environnement
 client = OpenAI(api_key="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")
 
-# Catégories
+# -------------------- Catégories --------------------
 DOMAIN_CATEGORIES = [
     "Brand Site",
     "Retailer",
@@ -30,10 +31,9 @@ PAGE_CATEGORIES = [
     "Other"
 ]
 
-# Batch size
-BATCH_SIZE = 50  # Nombre d'URLs par requête GPT
+BATCH_SIZE = 50  # Nombre d'URLs par batch
 
-# Fonction pour créer le prompt de batch
+# -------------------- Fonction prompt batch --------------------
 def create_batch_prompt(batch):
     prompt_lines = []
     for row in batch:
@@ -72,11 +72,11 @@ Voici les URLs à classer :
 {urls_text}
 
 Réponds uniquement par un JSON valide de la forme :
-{{ "URL1": { "domain_type": "...", "page_type": "..." }, "URL2": {...}, ... }}
+{{{{ "URL1": {{ "domain_type": "...", "page_type": "..." }}, "URL2": {{...}} }}}}
 """
     return prompt
 
-# Fonction de classification d'un batch
+# -------------------- Fonction classification batch --------------------
 def classify_batch(batch):
     prompt = create_batch_prompt(batch)
     try:
@@ -92,12 +92,12 @@ def classify_batch(batch):
         st.warning(f"Erreur GPT pour un batch: {e}")
         return {}
 
-# ---------------- Streamlit ----------------
+# -------------------- Streamlit --------------------
 st.title("Classification intelligente de sites web et pages (Screaming Frog CSV)")
 
 uploaded_file = st.file_uploader("Importer un CSV export Screaming Frog", type=["csv"])
 if uploaded_file:
-    df = pd.read_csv(uploaded_file)
+    df = pd.read_csv(uploaded_file, low_memory=False)
     
     if "Adresse" not in df.columns:
         st.error("Le fichier doit contenir la colonne 'Adresse' pour les URLs.")
@@ -107,13 +107,13 @@ if uploaded_file:
         st.info("Classification en cours, cela peut prendre un certain temps pour 38 000 URLs...")
         
         results = []
+        total_batches = (len(df) + BATCH_SIZE - 1) // BATCH_SIZE
         
-        # Découpage en batches
         for i in range(0, len(df), BATCH_SIZE):
             batch = df.iloc[i:i+BATCH_SIZE].to_dict('records')
             batch_result = classify_batch(batch)
             
-            # Mapping des résultats sur le batch
+            # Mapping résultats
             for row in batch:
                 url = row['Adresse']
                 if url in batch_result:
@@ -130,8 +130,8 @@ if uploaded_file:
                         "domain_type": "Other",
                         "page_type": "Other"
                     })
-            st.write(f"Batch {i//BATCH_SIZE+1}/{len(df)//BATCH_SIZE+1} traité")
-            time.sleep(1)  # petite pause pour éviter de saturer l'API
+            st.write(f"Batch {i//BATCH_SIZE+1}/{total_batches} traité")
+            time.sleep(1)  # pause pour éviter de saturer l'API
         
         result_df = pd.DataFrame(results)
         st.dataframe(result_df)
